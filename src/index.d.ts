@@ -1,9 +1,9 @@
-import type { SharedContext } from 'vite-ssr/utils/types'
+import type { SharedContext, SharedOptions } from 'vite-ssr/utils/types'
 
 declare module 'vitedge' {
   const handler: (
     App: any,
-    options: {
+    options: Pick<SharedOptions, 'transformState'> & {
       routes: Array<Record<string, any>>
       base?: (params: { url: URL }) => string
       pageProps?: { passToPage: boolean }
@@ -17,19 +17,20 @@ declare module 'vitedge' {
         stringifyQuery?: any
       }
     },
-    hook: (params: {
-      app: any
-      router: any
-      isClient: boolean
-      initialState: unknown
-      initialRoute: any
-    }) => void | Promise<void>
+    hook: (
+      params: Omit<SharedContext, 'request' | 'response'> & {
+        app: any
+        router: any
+        initialRoute: any
+        request: Request
+      }
+    ) => void | Promise<void>
   ) => void
 
   export default handler
 
   export const ClientOnly: any
-  export const useContext: Omit<SharedContext, 'request' | 'response'>
+  export const useContext: () => Omit<SharedContext, 'request' | 'response'>
   export const usePageProps: () => Record<string, any>
 }
 
