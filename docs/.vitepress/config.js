@@ -57,6 +57,10 @@ module.exports = {
             link: '/conditional-rendering',
           },
           {
+            text: 'Request Lifecycle',
+            link: '/request-lifecycle',
+          },
+          {
             text: 'CORS',
             link: '/cors',
           },
@@ -70,7 +74,7 @@ module.exports = {
         text: 'Extras',
         children: [
           {
-            text: 'Common Integrations',
+            text: 'Integrations & How-tos',
             link: '/integrations',
           },
           {

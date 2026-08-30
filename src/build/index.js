@@ -4,7 +4,7 @@ import buildFunctions from './functions.js'
 import buildWorker from './worker.js'
 import { meta, getProjectInfo } from '../config.js'
 import { lookupFile } from '../utils/files.js'
-import { findWranglerFilePath } from '../utils/wrangler.js'
+import { getWranglerConfig } from '../utils/wrangler.js'
 
 const {
   outDir,
@@ -24,44 +24,43 @@ export default async function ({
   watch,
   entry,
   worker,
-  noBundle,
+  ...workerFlags
 } = {}) {
-  const { config, rootDir } = await getProjectInfo(mode)
-  const { fnsOptions = {} } =
-    config.plugins.find((plugin) => plugin.name === 'vitedge') || {}
+  const { config: viteConfig, rootDir } = await getProjectInfo(mode)
+  const { fnsOptions = {}, workerOptions = {} } =
+    viteConfig.plugins.find((plugin) => plugin.name === 'vitedge') || {}
 
-  const { getPropsHandlerNames } = await buildFunctions({
+  const { getPropsHandlerNames, logFunctionsBuild } = await buildFunctions({
     mode,
     watch,
     root: rootDir,
-    fnsInputPath: path.resolve(rootDir, fnsInDir),
-    fnsOutputPath: path.resolve(rootDir, outDir),
+    logger: viteConfig.logger,
+    inDir: fnsInDir,
+    outDir,
     fileName: fnsOutFile,
-    options: fnsOptions.build,
+    options: fnsOptions,
   })
 
   const sep = '|'
-  const plugins = [
-    {
-      name: 'vitedge-props-replacer',
-      transform(code, id) {
-        // Use `transform` hook for replacing variables because `config`
-        // hook is not retriggered on watcher events.
-        if (id.endsWith('/vitedge/utils/props.js')) {
-          watch && this.addWatchFile(path.resolve(rootDir, outDir, fnsOutFile))
-          return code.replace(
-            'globalThis.__AVAILABLE_PROPS_ENDPOINTS__',
-            JSON.stringify(sep + getPropsHandlerNames().join(sep) + sep)
-          )
-        }
-      },
+  const propsReplacerPlugin = {
+    name: 'vitedge-props-replacer',
+    transform(code, id) {
+      // Use `transform` hook for replacing variables because `config`
+      // hook is not retriggered on watcher events.
+      if (id.endsWith('/vitedge/utils/props.js')) {
+        watch && this.addWatchFile(path.resolve(rootDir, outDir, fnsOutFile))
+        return code.replace(
+          'globalThis.__AVAILABLE_PROPS_ENDPOINTS__',
+          JSON.stringify(sep + getPropsHandlerNames().join(sep) + sep)
+        )
+      }
     },
-  ]
+  }
 
   await buildSSR({
     clientOptions: {
       mode,
-      plugins,
+      plugins: [propsReplacerPlugin],
       build: {
         watch,
         outDir: path.resolve(rootDir, outDir, clientOutDir),
@@ -70,7 +69,7 @@ export default async function ({
     serverOptions: {
       mode,
       ssr: { target: 'webworker' },
-      plugins,
+      plugins: [{ ...propsReplacerPlugin, writeBundle: logFunctionsBuild }],
       build: {
         ssr,
         outDir: path.resolve(rootDir, outDir, ssrOutDir),
@@ -102,13 +101,20 @@ export default async function ({
   }
 
   if (entry) {
-    const isWorker = !!(worker || findWranglerFilePath(rootDir))
+    const wranglerConfig = await getWranglerConfig(viteConfig)
+    const isWorker = !!(worker || wranglerConfig)
+
+    if (isWorker && wranglerConfig.type !== 'javascript') {
+      // Do not build script when using Webpack
+      return
+    }
 
     await buildWorker({
+      ...workerFlags,
       watch,
-      noBundle,
+      esbuildOptions: workerOptions.build,
       inputPath: entry,
-      viteConfig: config,
+      viteConfig,
       platform: isWorker ? 'worker' : 'node',
       fileName: isWorker ? workerOutFile : nodeOutFile,
       outputPath: isWorker ? path.join(outDir, workerOutDir) : outDir,

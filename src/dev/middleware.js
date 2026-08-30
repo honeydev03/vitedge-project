@@ -2,103 +2,31 @@ import path from 'path'
 import fg from 'fast-glob'
 import { loadEnv } from '../utils/env.js'
 import { meta } from '../config.js'
-import { safeHandler } from '../errors.js'
 import {
   findRouteValue,
   pathsToRoutes,
   routeToRegexp,
 } from '../utils/api-routes.js'
-import {
-  getUrlFromNodeRequest,
-  nodeToFetchRequest,
-  parseHandlerResponse,
-} from '../node/utils.js'
+import { getUrlFromNodeRequest } from '../node/utils.js'
+import { polyfillWorkerAPIs, polyfillWebAPIs } from './polyfills.js'
+import { normalizePathname, handleFunctionRequest } from './request.js'
 
 const { fnsInDir } = meta
 
-let originalFetch
-
-async function polyfillWebAPIs() {
-  globalThis.atob = (str) => Buffer.from(str, 'base64').toString('binary')
-  globalThis.btoa = (str) => Buffer.from(str).toString('base64')
-
+async function prepareEnvironment(params) {
   try {
-    const { Crypto } = await import('node-webcrypto-ossl')
-    globalThis.crypto = new Crypto()
-  } catch {}
+    await polyfillWorkerAPIs(params)
+  } catch (_) {
+    await polyfillWebAPIs()
+  }
 
-  try {
-    const fetch = await import('node-fetch')
-    globalThis.fetch = originalFetch = fetch.default || fetch
-    globalThis.Request = fetch.Request
-    globalThis.Response = fetch.Response
-  } catch {}
-}
+  const { config } = params
 
-async function prepareEnvironment(config) {
-  await polyfillWebAPIs()
   await loadEnv({
     dry: false,
     mode: config.mode,
     root: path.resolve(config.root, fnsInDir),
   })
-}
-
-async function handleFunctionRequest(
-  req,
-  res,
-  { fnsInputPath, functionPath, extra, mockRedirect }
-) {
-  try {
-    let endpointMeta = await import(`${fnsInputPath}${functionPath}.js`)
-
-    if (endpointMeta) {
-      endpointMeta = endpointMeta.default || endpointMeta
-      if (endpointMeta.handler) {
-        const fetchRequest = await nodeToFetchRequest(req)
-
-        const handlerResponse = await safeHandler(() =>
-          endpointMeta.handler({
-            ...(extra || {}),
-            rawRequest: req, // For Node environments
-            request: fetchRequest,
-            headers: fetchRequest.headers,
-            event: {
-              clientId: process.pid,
-              request: fetchRequest,
-              respondWith: () => undefined,
-              waitUntil: () => undefined,
-            },
-          })
-        )
-
-        const { statusCode, statusText, headers, body } = parseHandlerResponse(
-          handlerResponse,
-          endpointMeta.options
-        )
-
-        res.statusMessage = statusText
-        res.statusCode =
-          (statusCode >= 300) & (statusCode < 400) && mockRedirect
-            ? 299
-            : statusCode
-
-        for (const [key, value] of Object.entries(headers)) {
-          res.setHeader(key, value)
-        }
-
-        return res.end(body)
-      }
-    }
-  } catch (error) {
-    console.error(error)
-    res.statusMessage = error.message
-    res.statusCode = 500
-    return res.end()
-  }
-
-  res.statusCode = 404
-  return res.end()
 }
 
 async function watchFnsFiles(
@@ -237,9 +165,19 @@ async function watchAvailablePropsEndpoints({ fnsInputPath, watcher, ws }) {
   }
 }
 
-export async function configureServer({ middlewares, config, watcher, ws }) {
+export async function configureServer({
+  middlewares,
+  httpServer,
+  watcher,
+  config,
+  ws,
+}) {
   const fnsInputPath = `${config.root}/${fnsInDir}`
-  await prepareEnvironment(config)
+  await prepareEnvironment({
+    config,
+    httpServer,
+    fnsInputPath,
+  })
 
   const { dynamicFileRouteSet, staticApiRouteSet, dynamicApiRouteMap } =
     await getAllFunctionFiles({ fnsInputPath, watcher })
@@ -261,9 +199,7 @@ export async function configureServer({ middlewares, config, watcher, ws }) {
       })
     }
 
-    const normalizedPathname = url.pathname.includes('.')
-      ? url.pathname.slice(0, url.pathname.lastIndexOf('.'))
-      : url.pathname
+    const normalizedPathname = normalizePathname(url)
 
     if (
       url.pathname.startsWith('/api/') ||
@@ -316,7 +252,8 @@ export async function configureServer({ middlewares, config, watcher, ws }) {
   })
 }
 
-let fetchWrapApplied = false
+const WRAP_APPLIED_SYMBOL = Symbol('ssr')
+
 /**
  * Returns the initial state used for the first server-side rendered page.
  * It mimics entry-client logic, but runs in the server.
@@ -327,9 +264,8 @@ export async function getRenderContext({
 }) {
   url = new URL(url)
 
-  if (!fetchWrapApplied) {
-    fetchWrapApplied = true
-
+  if (!globalThis.fetch[WRAP_APPLIED_SYMBOL]) {
+    const originalFetch = globalThis.fetch
     globalThis.fetch = function (resource, options) {
       if (typeof resource === 'string' && resource.startsWith('/')) {
         resource = url.origin + resource
@@ -337,6 +273,8 @@ export async function getRenderContext({
 
       return originalFetch(resource, options)
     }
+
+    globalThis.fetch[WRAP_APPLIED_SYMBOL] = true
   }
 
   const propsRoute = resolve(url)
@@ -357,14 +295,8 @@ export async function getRenderContext({
       })
 
       if (res.status >= 300 && res.status < 400) {
-        const headers = {}
-
-        for (const [key, value] of res.headers.entries()) {
-          headers[key] = value
-        }
-
         // Returning a response like this will skip rendering
-        return { status: res.status, headers }
+        return { status: res.status, headers: Object.fromEntries(res.headers) }
       }
 
       const data = await res.json()

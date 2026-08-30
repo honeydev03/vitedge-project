@@ -25,13 +25,7 @@ export function isApiRequest(event) {
 export function parseQuerystring(event) {
   const url = new URL(event.request.url)
   // Parse querystring similarly to Express or Rails (there's no standard for this)
-  const query = Array.from(url.searchParams.entries()).reduce(
-    (acc, [key, value]) => ({
-      ...acc,
-      [key]: value,
-    }),
-    {}
-  )
+  const query = Object.fromEntries(url.searchParams)
 
   return { url, query }
 }
@@ -103,10 +97,12 @@ export async function handleApiRequest(event) {
 
 const originalFetch = globalThis.fetch
 
-export function createLocalFetch(instanceRequest) {
+export function createLocalFetch(instanceRequest, waitUntil) {
   return function localFetch(resource, options = {}) {
     if (typeof resource === 'string' && resource.startsWith('/')) {
       const event = {
+        type: 'fetch',
+        waitUntil,
         request: new Request(
           new URL(instanceRequest.url).origin + resource,
           new Request(instanceRequest, options)

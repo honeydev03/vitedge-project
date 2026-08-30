@@ -4,13 +4,13 @@
 
 > What's ESR? Think of SSR (Server Side Rendering) in CDN nodes instead of actual servers. This is possible today thanks to [Cloudflare Workers](https://workers.cloudflare.com/) (and maybe some other platforms in the near future).
 
-Vitedge is **just a Vite app ™** that prerrenders the first view in an edge worker and runs the rest as an SPA. That means it will lead to good SEO while keeping the snappy routing and DX of an SPA.
+Vitedge is **just a Vite app ™** that prerenders the first view in an edge worker and runs the rest as an SPA. That means it will lead to good SEO while keeping the snappy routing and DX of an SPA.
 
 It can replace static site generators in some situations since it builds on the fly and caches at the edge. Therefore, instead of getting a static `index.html` from the CDN, the CDN itself will create it on the fly or provide it from cache if it was already accessed (with configurable cache age + stale-while-revalidate).
 
 Even though running it at the edge is ideal, it is actually compatible with any Node environment such as Vercel or Netlify.
 
-See [live demo](https://vitessedge.zable.workers.dev/) and [Vue starter template](https://github.com/frandiox/vitessedge-template).
+See [live demo](https://vitessedge.zable.workers.dev/), and [Vue](https://github.com/frandiox/vitessedge-template) or [React](https://github.com/frandiox/reactesse-edge-template) starter templates.
 
 ## Features
 
@@ -29,6 +29,7 @@ To talk about Vitedge, join [ViteLand Discord](https://discord.gg/taRZdpzHhR) an
 ## Starters
 
 - Vue, TS, i18n - [Code](https://github.com/frandiox/vitessedge-template) | [Demo](https://vitessedge.zable.workers.dev/)
+- React, TS, i18n - [Code](https://github.com/frandiox/reactesse-edge-template) | [Demo](https://reactesse.zable.workers.dev/)
 
 ## Roadmap
 
@@ -46,8 +47,7 @@ To talk about Vitedge, join [ViteLand Discord](https://discord.gg/taRZdpzHhR) an
 - [x] Add an SSR mode for local development (web worker?).
 - [x] Support GraphQL, sitemap and other dynamic endpoints.
 - [x] React compatibility.
-- [ ] Provide React starter template.
-- [ ] Svelte compatibility.
+- [x] Provide React starter template.
 - [x] Support Vite 2.
 - [x] HMR for API side.
 - [x] Page props HMR in browser on file save.
@@ -58,11 +58,11 @@ To talk about Vitedge, join [ViteLand Discord](https://discord.gg/taRZdpzHhR) an
 - [x] CORS defaults.
 - [x] Throw errors from API/Props endpoints.
 - [x] Redirects with 3xx HTTP codes.
-- [ ] Mockup KV in development.
+- [x] Mockup KV and cache in development.
 - [ ] Mockup DO in development.
 - [ ] Rewrite in TypeScript.
 - [ ] Guide to bring your own view framework.
-- [ ] Preview mode to simulate Worker environment in development.
+- [x] Preview mode to simulate Worker environment in development.
 
 ## Contributing
 

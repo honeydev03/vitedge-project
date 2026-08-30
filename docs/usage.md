@@ -17,6 +17,47 @@ You can pass any Vite's CLI option to this command. E.g. `vitedge dev --open --p
 The local SSR server is a Node.js environment to speed up development. This might have some inconsistencies at times with Worker environments, especially if you have third-party dependencies that rely on Node APIs instead of Web Standards. For testing your app in a Worker environment, have a look at [preview mode](#preview).
 :::
 
+### Custom dev servers
+
+If you are deploying to Node.js environments, it might be interesting running the development environment using your own Node server. Just like Vite itself, Vitedge can be run in middleware mode as follows:
+
+```js
+// my-server.js
+import express from 'express'
+import { createSsrServer } from 'vitedge/dev'
+
+async function createServer() {
+  const app = express()
+
+  // Create Vitedge server in middleware mode
+  const viteServer = await createSsrServer({
+    server: { middlewareMode: 'ssr' },
+  })
+
+  // Use Vite's connect instance as middleware
+  app.use(viteServer.middlewares)
+
+  app.listen(3000)
+}
+
+createServer()
+```
+
+Since Vitedge requires experimental Node flags and other features when running (e.g. TypeScript, ESM and JSON imports), you can run your server using one of the following commands:
+
+```bash
+# Simple version, Vitedge applies flags
+vitedge dev --ssr --middleware ./my-server.js
+
+# Raw version for TS, manual flags
+node --loader vitedge/dev/ts-loader.js --experimental-json-modules --experimental-specifier-resolution=node ./my-server.js
+
+# Raw version for JS, manual flags
+node --loader vitedge/dev/js-loader.js --experimental-json-modules --experimental-specifier-resolution=node ./my-server.js
+```
+
+If you are using CommonJS and have problems importing from `vitedge/dev`, try requiring from `vitedge/dev/index.cjs` instead.
+
 ## Production
 
 Once the app is ready, run `vitedge build` to create 3 different builds:
@@ -51,7 +92,9 @@ Currently, there are two ways to generate a bundled worker script and deploy usi
 
 #### Webpack
 
-Using Wrangler's Webpack build, add the following to your `wrangler.toml`:
+Make sure your `package.json`'s `main` field points to the worker **entry file** (i.e. where you use `addEventListener`, not the script output). This file can be located anywhere, but it is common to place it in `<root>/worker-site/index.js` and have a separate `<root>/worker-site/package.json` as well. Full example [here](https://github.com/frandiox/vitedge/tree/master/examples/worker-site).
+
+Using Wrangler's Webpack build, add the following to your `<root>/worker-site/wrangler.toml`:
 
 ```toml
 name = "<your app>"
@@ -66,8 +109,6 @@ webpack_config = "webpack.config.js"
 bucket = "dist/client"
 entry-point = "."
 ```
-
-Make sure your `package.json`'s `main` field points to the worker entry file.
 
 Import Vitedge's webpack configuration in your worker's webpack config file:
 
@@ -89,7 +130,7 @@ ESBuild bundler is experimental, make sure you test your app before switching fr
 Vitedge can generate a worker script ready to be deployed using ESBuild. Follow these steps:
 
 1. Move your worker entry file to `<root>/functions/index.js` (or `*.ts`).
-2. Add `"main" : "dist/worker/script.js"` to your `package.json`.
+2. Add `"main" : "dist/worker/script.js"` to your `<root>/package.json`.
 3. Place your `wrangler.toml` file at the root (next to `package.json`) with the following content:
 
 ```toml
