@@ -7,13 +7,13 @@
 
 ## Installation
 
-For a complete **starter template** with i18n, file routing and layout system, see [Vitessedge Template](https://github.com/frandiox/vitessedge-template). Otherwise, create a new project from scratch following these steps:
+For a complete **starter template** with Vue, i18n, file routing and layout system, see [Vitessedge Template](https://github.com/frandiox/vitessedge-template). Otherwise, create a new project from scratch following these steps:
 
 ### 1. Create a Vite app
 
 Since Vitedge is just a [Vite app](https://vitejs.dev/guide/#scaffolding-your-first-vite-project), first of all you must create one:
 
-```sh
+```bash
 # Using NPM
 npm init @vitejs/app my-vue-app --template [vue|vue-ts|react|react-ts]
 
@@ -31,7 +31,7 @@ First, add the following to your `package.json`:
 
 Then, add Vitedge package:
 
-```sh
+```bash
 # Using NPM
 npm i vitedge
 
@@ -80,11 +80,29 @@ export default vitedge(
 )
 ```
 
-Note that you don't need to create a router yourself. Vitedge will do this automatically after you provide the raw routes array.
+The third argument is Vitedge's main hook, which runs only once at the start. It receives the [SSR Context](./ssr-context) and can be used to initialize the app or setup anything like state management or other plugins.
+
+In React, the same SSR Context is passed to the main App function/component as props. You must rely on the routes provided in `router.routes` instead of the raw `routes` array when using React Router:
+
+```jsx
+import { Switch, Route } from 'react-router-dom'
+
+export default function App({ router }) {
+  return (
+    <Switch>
+      {router.routes.map((route) => (
+        <Route exact={route.exact} path={route.path} key={route.path}>
+          <route.component />
+        </Route>
+      ))}
+    </Switch>
+  )
+}
+```
 
 ### 5. Add backend functions
 
-Create a `<root>/functions/` directory and populate [`<root>/functions/api/`](./api) and [`<root>/functions/props/`](./props) with your backend logic.
+Create a `<root>/functions/` directory and populate `<root>/functions/api/` with [API endpoints](./api) and `<root>/functions/props/` with [Page Props](./props).
 
 You can also add [environment files](./environment) in this directory.
 
@@ -97,6 +115,6 @@ TypeScript is fully supported but needs some extra setup:
 
 ### Web Polyfills (optional)
 
-Vitedge automatically polyfills some Web-only functionaly during development in Node.js, such as `fetch`, `btoa`, etc. If you need WebCrypto, simply install it as a dev-dependency and Vitedge will use it automatically.
+Vitedge automatically polyfills some Web-only functionaly during development in Node.js, such as `fetch`, `btoa`, etc. If you need WebCrypto for anything related to JWT verification or Crypto in general, simply install [`node-webcrypto-ossl`](https://www.npmjs.com/package/node-webcrypto-ossl) as `devDependencies` and Vitedge will use it automatically during development.
 
 For other polyfills, please open feature requests in the repo.

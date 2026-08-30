@@ -1,7 +1,14 @@
-import { handleStaticAsset, isStaticAsset } from './assets'
-import { handleApiRequest, isApiRequest, parseQuerystring } from './api'
-import { handlePropsRequest, isPropsRequest } from './props'
-import { handleViewRendering } from './render'
+import { handleStaticAsset, isStaticAsset } from './assets.js'
+import { handlePropsRequest, isPropsRequest } from './props.js'
+import { handleViewRendering } from './render.js'
+import {
+  handleApiRequest,
+  isApiRequest,
+  parseQuerystring,
+  createLocalFetch,
+} from './api.js'
+
+export { addCorsHeaders as cors } from './utils.js'
 
 export async function handleEvent(
   event,
@@ -17,8 +24,13 @@ export async function handleEvent(
     didRequestProps,
     willRequestRender,
     didRequestRender,
-  }
+  } = {}
 ) {
+  // --- PREFLIGHT REQUESTS
+  if (event.request.method === 'OPTIONS') {
+    return createResponse(null, { status: 204 })
+  }
+
   // --- STATIC FILES
   if (isStaticAsset(event)) {
     willRequestAsset && (await willRequestAsset({ event }))
@@ -29,6 +41,8 @@ export async function handleEvent(
       response
     )
   }
+
+  globalThis.fetch = createLocalFetch(event.request)
 
   // --- PROPS ENDPOINTS
   if (isPropsRequest(event)) {

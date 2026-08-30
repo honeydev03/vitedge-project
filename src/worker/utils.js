@@ -1,34 +1,9 @@
 import fns from '__vitedge_functions__'
+import { findRouteValue } from '../utils/api-routes.js'
+import { cors } from '../utils/cors.js'
 
-export function resolveFnsEndpoint(endpoint, onlyStrings = false) {
-  if (fns.strings[endpoint]) {
-    return { meta: fns.strings[endpoint] }
-  }
-
-  if (onlyStrings) {
-    return null
-  }
-
-  let meta
-  let params = {}
-
-  for (const [regexp, value] of fns.regexps) {
-    const match = regexp.exec(endpoint)
-    if (match) {
-      meta = value.value
-      for (let i = 0; i < value.keys.length; i++) {
-        params[value.keys[i]] = match[i + 1]
-      }
-
-      break
-    }
-  }
-
-  if (meta) {
-    return { meta, params }
-  }
-
-  return null
+export function resolveFnsEndpoint(endpoint, onlyStatic = false) {
+  return findRouteValue(endpoint, fns, { onlyStatic })
 }
 
 export function createResponse(body, params = {}) {
@@ -40,4 +15,35 @@ export function createResponse(body, params = {}) {
 
 export function createNotFoundResponse() {
   return createResponse(null, { status: 404 })
+}
+
+function handleCors(options, response) {
+  const headers = cors(options, response.status === 204)
+
+  for (const [key, value] of Object.entries(headers)) {
+    response.headers.set(key, value)
+  }
+
+  return response
+}
+
+export function addCorsHeaders(maybeResponse, options) {
+  if (
+    !options &&
+    maybeResponse &&
+    !maybeResponse.then &&
+    !maybeResponse.clone
+  ) {
+    // Used as `addCorsHeaders()` or `addCorsHeaders({ ... })` for preflight
+    options = maybeResponse
+    maybeResponse = null
+  }
+
+  if (!maybeResponse) {
+    maybeResponse = createResponse(null, { status: 204 })
+  }
+
+  return maybeResponse.then
+    ? maybeResponse.then(handleCors.bind(null, options))
+    : handleCors(options, maybeResponse)
 }

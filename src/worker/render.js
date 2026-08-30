@@ -1,11 +1,9 @@
 import router from '__vitedge_router__'
+import { isRedirect } from '../utils/response'
 import { getSsrManifest } from './assets'
 import { getCachedResponse, setCachedResponse } from './cache'
 import { getPageProps } from './props'
-import { createLocalFetch } from './api'
 import { createResponse } from './utils'
-
-const originalFetch = globalThis.fetch
 
 function hasAttribute(string, attr) {
   return new RegExp(`\\s${attr}[\\s>]`).test(string)
@@ -69,17 +67,21 @@ export async function handleViewRendering(event, { http2ServerPush }) {
     getSsrManifest(event),
   ])
 
-  if (pageProps.response.status >= 300 && pageProps.response.status < 400) {
+  if (isRedirect(pageProps.response)) {
     // Redirect
     return pageProps.response
   }
 
-  const initialState = (await pageProps.response.json()) || {}
   const options = pageProps.options || {}
+  const initialState =
+    (pageProps.response.body && (await pageProps.response.json())) || {}
 
-  globalThis.fetch = createLocalFetch(event.request)
-
-  const { html } = await router.render(event.request.url, {
+  const {
+    html,
+    status = 200,
+    statusText,
+    headers: renderingHeaders,
+  } = await router.render(event.request.url, {
     initialState,
     propsStatusCode: pageProps.response.status,
     request: event.request,
@@ -87,19 +89,19 @@ export async function handleViewRendering(event, { http2ServerPush }) {
     preload: true,
   })
 
-  globalThis.fetch = originalFetch
+  const headers = { ...options.headers, ...renderingHeaders }
 
-  const headers = {
-    ...options.headers,
-    'content-type': 'text/html;charset=UTF-8',
-  }
+  if (html) {
+    headers['content-type'] = 'text/html;charset=UTF-8'
 
-  if (http2ServerPush) {
-    headers.link = buildLinkHeader(html, http2ServerPush)
+    if (http2ServerPush) {
+      headers.link = buildLinkHeader(html, http2ServerPush)
+    }
   }
 
   const response = createResponse(html, {
-    status: 200,
+    status,
+    statusText,
     headers,
   })
 

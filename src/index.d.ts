@@ -1,25 +1,27 @@
-declare module 'vitedge' {
-  import { App, Component } from 'vue'
-  import { Router, RouteLocationRaw, RouteLocationNormalized } from 'vue-router'
+import type { SharedContext } from 'vite-ssr/utils/types'
 
+declare module 'vitedge' {
   const handler: (
-    App: Component,
+    App: any,
     options: {
-      routes: RouteLocationRaw[]
+      routes: Array<Record<string, any>>
       base?: (params: { url: URL }) => string
       pageProps?: { passToPage: boolean }
       debug?: { mount?: boolean }
     },
     hook: (params: {
-      app: App
-      router: Router
+      app: any
+      router: any
       isClient: boolean
       initialState: unknown
-      initialRoute: RouteLocationNormalized
+      initialRoute: any
     }) => void | Promise<void>
   ) => void
 
   export default handler
+
+  export const ClientOnly: any
+  export const useContext: Omit<SharedContext, 'request' | 'response'>
 }
 
 export type PropsOptions = {
@@ -31,7 +33,7 @@ export type PropsOptions = {
   }
 }
 
-type ReturnedPropsPayload = { data: any; options?: PropsOptions }
+type ReturnedPropsPayload = PropsOptions & { data?: any }
 
 export type EdgeProps = {
   options?: PropsOptions
@@ -52,13 +54,16 @@ export type EdgeProps = {
 
 export type ApiOptions = {
   status?: number
+  statusText?: string
   headers?: Record<string, string>
   cache?: {
     api?: number | boolean
   }
 }
 
-type ReturnedApiPayload = { data: any; options?: ApiOptions }
+type ReturnedApiPayload =
+  | (ApiOptions & { data?: any })
+  | Omit<Response, keyof Response>
 
 export type ApiEndpoint = {
   options?: ApiOptions

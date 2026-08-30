@@ -1,19 +1,25 @@
-import nodeFetch from 'node-fetch'
+import './polyfill.js'
 import { createLocalFetch, handleApiRequest } from './api.js'
 import { getPageProps } from './props.js'
-import { getEventType } from './utils.js'
+import { getEventType, nodeToFetchRequest } from './utils.js'
+import { isRedirect } from '../utils/response.js'
 
 export { getEventType }
-
-globalThis.fetch = nodeFetch
-globalThis.Request = nodeFetch.Request
-globalThis.Response = nodeFetch.Response
+export { cors } from '../utils/cors.js'
 
 export async function handleEvent(
   { functions, router, url, manifest, preload = true },
   event = {}
 ) {
   const type = getEventType({ url, functions })
+
+  if (event.request && !event.request.clone) {
+    // Convert to Fetch Request for consistency
+    event.rawRequest = event.rawRequest || event.request
+    event.request = await nodeToFetchRequest(event.request)
+  }
+
+  globalThis.fetch = createLocalFetch({ url, functions })
 
   if (type === 'api') {
     return handleApiRequest({ url, functions }, event)
@@ -30,12 +36,11 @@ export async function handleEvent(
     event
   )
 
-  let status = propsOptions.status
-  const isRedirect = status >= 300 && status < 400
+  const isRedirecting = isRedirect(propsOptions)
   // This handles SPA page props requests from the browser
-  if (type === 'props' || isRedirect) {
+  if (type === 'props' || isRedirecting) {
     // Mock status when this is a props request to bypass Fetch opaque responses
-    status = type === 'props' && isRedirect ? 299 : status
+    const status = type === 'props' && isRedirecting ? 299 : propsOptions.status
 
     return {
       statusCode: status,
@@ -46,10 +51,14 @@ export async function handleEvent(
     }
   }
 
-  globalThis.fetch = createLocalFetch({ url, functions })
-
   // If it didn't match anything else up to here, fallback to HTML rendering
-  const { html, ...extra } = await router.render(url, {
+  const {
+    html: body,
+    status: statusCode = 200,
+    statusText: statusMessage,
+    headers: renderingHeaders,
+    ...extra
+  } = await router.render(url, {
     ...event,
     initialState: pageProps,
     propsStatusCode: propsOptions.status,
@@ -57,7 +66,7 @@ export async function handleEvent(
     preload,
   })
 
-  globalThis.fetch = nodeFetch
+  const headers = { ...propsOptions.headers, ...renderingHeaders }
 
-  return { statusCode: 200, body: html, extra }
+  return { body, statusCode, statusMessage, headers, extra }
 }

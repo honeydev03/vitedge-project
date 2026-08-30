@@ -1,26 +1,61 @@
+const fs = require('fs')
 const path = require('path')
-const {
-  getProjectInfo,
-  outDir,
-  ssrOutDir,
-  fnsOutFile,
-} = require('./config.cjs')
+const { resolveAliases } = require('./meta.cjs')
+
+function findRootDirSync() {
+  function fileExists(dir, file) {
+    try {
+      fs.accessSync(path.resolve(dir, file))
+      return true
+    } catch (_) {
+      return false
+    }
+  }
+
+  let rootDir
+  const systemRoot = path.parse(process.cwd()).root
+
+  let currentDir = process.cwd()
+  while (!rootDir && currentDir !== systemRoot) {
+    if (fileExists(currentDir, 'vite.config.js')) {
+      rootDir = currentDir
+    } else if (fileExists(currentDir, 'vite.config.mjs')) {
+      rootDir = currentDir
+    } else if (fileExists(currentDir, 'vite.config.ts')) {
+      rootDir = currentDir
+    } else {
+      currentDir = path.resolve(currentDir, '..')
+    }
+  }
+
+  if (!rootDir) {
+    throw new Error(`Could not find Vite config file`)
+  }
+
+  return rootDir
+}
 
 module.exports = ({ root } = {}) => {
   if (!root) {
-    root = getProjectInfo().rootDir
+    root = findRootDirSync()
   }
+
+  let isReact = false
+  try {
+    require.resolve('@vitejs/plugin-react-refresh')
+    isReact = true
+  } catch (error) {}
 
   return {
     entry: './index',
     target: 'webworker',
     resolve: {
-      mainFields: ['browser', 'main', 'module'],
-      alias: {
-        __vitedge_functions__: path.resolve(root, outDir, fnsOutFile),
-        __vitedge_router__: path.resolve(root, outDir, ssrOutDir),
-        __vitedge_meta__: path.resolve(root, outDir, ssrOutDir, 'package.json'),
-      },
+      mainFields: isReact
+        ? // Webpack defaults for webworker https://webpack.js.org/configuration/resolve/#resolvemainfields
+          ['browser', 'module', 'main']
+        : // Vue crashes when importing 'module' before 'main'
+          ['browser', 'main', 'module'],
+      alias: resolveAliases(root),
     },
   }
 }

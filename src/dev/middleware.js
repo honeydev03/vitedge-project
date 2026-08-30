@@ -1,33 +1,20 @@
+import path from 'path'
+import fg from 'fast-glob'
 import { loadEnv } from '../utils/env.js'
-import { promises as fs } from 'fs'
-import projectConfig from '../config.cjs'
+import { meta } from '../config.js'
 import { safeHandler } from '../errors.js'
+import {
+  findRouteValue,
+  pathsToRoutes,
+  routeToRegexp,
+} from '../utils/api-routes.js'
+import {
+  getUrlFromNodeRequest,
+  nodeToFetchRequest,
+  parseHandlerResponse,
+} from '../node/utils.js'
 
-const { fnsInDir } = projectConfig
-
-function getUrl(req) {
-  const secure =
-    req.connection.encrypted || req.headers['x-forwarded-proto'] === 'https'
-
-  return new URL(`${secure ? 'https' : 'http'}://${req.headers.host + req.url}`)
-}
-
-function nodeToFetchRequest(nodeRequest) {
-  return new Promise((resolve, reject) => {
-    let data = []
-    nodeRequest.on('data', (chunk) => data.push(chunk))
-    nodeRequest.on('error', (error) => reject(error))
-    nodeRequest.on('end', () => {
-      // Simulate a FetchEvent.request https://developer.mozilla.org/en-US/docs/Web/API/Request
-      resolve(
-        new Request(getUrl(nodeRequest), {
-          ...nodeRequest,
-          body: data.length === 0 ? undefined : Buffer.concat(data),
-        })
-      )
-    })
-  })
-}
+const { fnsInDir } = meta
 
 let originalFetch
 
@@ -48,30 +35,32 @@ async function polyfillWebAPIs() {
   } catch {}
 }
 
-async function prepareEnvironment() {
+async function prepareEnvironment(config) {
   await polyfillWebAPIs()
-
-  loadEnv({ dry: false })
+  await loadEnv({
+    dry: false,
+    mode: config.mode,
+    root: path.resolve(config.root, fnsInDir),
+  })
 }
 
 async function handleFunctionRequest(
   req,
   res,
-  { config, functionPath, extra, mockRedirect }
+  { fnsInputPath, functionPath, extra, mockRedirect }
 ) {
   try {
-    let endpointMeta = await import(
-      `${config.root}/${fnsInDir}${functionPath}.js`
-    )
+    let endpointMeta = await import(`${fnsInputPath}${functionPath}.js`)
 
     if (endpointMeta) {
       endpointMeta = endpointMeta.default || endpointMeta
       if (endpointMeta.handler) {
         const fetchRequest = await nodeToFetchRequest(req)
 
-        const { data, ...options } = await safeHandler(() =>
+        const handlerResponse = await safeHandler(() =>
           endpointMeta.handler({
             ...(extra || {}),
+            rawRequest: req, // For Node environments
             request: fetchRequest,
             headers: fetchRequest.headers,
             event: {
@@ -83,29 +72,22 @@ async function handleFunctionRequest(
           })
         )
 
-        let status = options.status || 200
-        if ((status >= 300) & (status < 400) && mockRedirect) {
-          status = 299
-        }
+        const { statusCode, statusText, headers, body } = parseHandlerResponse(
+          handlerResponse,
+          endpointMeta.options
+        )
 
-        res.statusCode = status
-        res.statusMessage = options.statusText
-
-        const headers = {
-          'content-type': 'application/json; charset=utf-8',
-          ...endpointMeta.options?.headers,
-          ...options.headers,
-        }
+        res.statusMessage = statusText
+        res.statusCode =
+          (statusCode >= 300) & (statusCode < 400) && mockRedirect
+            ? 299
+            : statusCode
 
         for (const [key, value] of Object.entries(headers)) {
           res.setHeader(key, value)
         }
 
-        return res.end(
-          res.getHeader('content-type')?.startsWith('application/json')
-            ? JSON.stringify(data || {})
-            : data
-        )
+        return res.end(body)
       }
     }
   } catch (error) {
@@ -119,40 +101,58 @@ async function handleFunctionRequest(
   return res.end()
 }
 
-async function watchDynamicFiles({ config, watcher }) {
+async function watchFnsFiles(
+  globs = [],
+  { fnsInputPath, watcher, onChange = () => null }
+) {
   const getFileFromPath = (filepath) => {
     const file = filepath.includes('/')
       ? filepath.split(`/${fnsInDir}/`)[1]
       : filepath
 
-    if (file && !file.includes('/') && /\.[jt]sx?$/i.test(file)) {
-      return file.split('.')[0]
+    if (file && /\.[jt]sx?$/i.test(file)) {
+      return '/' + file.slice(0, file.lastIndexOf('.'))
     }
   }
 
-  // Dynamic files to serve (functions/sitemap.js, functions/graphql.js, etc.)
   const fnsDirFiles = new Set(
-    (await fs.readdir(`${config.root}/${fnsInDir}`))
+    (
+      await fg(
+        globs.map((glob) => `${fnsInputPath}/${glob}.{js,ts}`),
+        {
+          ignore: ['node_modules', '.git', '**/index.*'],
+          onlyFiles: true,
+        }
+      )
+    )
       .map(getFileFromPath)
       .filter(Boolean)
   )
 
   watcher.on('add', (path) => {
     const file = getFileFromPath(path)
-    file && fnsDirFiles.add(file)
+    if (file) {
+      file && fnsDirFiles.add(file)
+      onChange(fnsDirFiles)
+    }
   })
 
   watcher.on('unlink', (path) => {
     const file = getFileFromPath(path)
-    file && fnsDirFiles.delete(file)
+    if (file) {
+      file && fnsDirFiles.delete(file)
+      onChange(fnsDirFiles)
+    }
   })
+
+  onChange(fnsDirFiles)
 
   return fnsDirFiles
 }
 
-function watchPropReload({ config, watcher, ws }) {
+function watchPropReload({ fnsInputPath, watcher, ws }) {
   watcher.on('change', (path) => {
-    let [, filepath] = path.split(`${config.root}/${fnsInDir}`)
+    let [, filepath] = path.split(fnsInputPath)
     if (filepath) {
       filepath = filepath.slice(0, filepath.lastIndexOf('.'))
       ws.send({
@@ -164,19 +164,95 @@ function watchPropReload({ config, watcher, ws }) {
   })
 }
 
+async function getAllFunctionFiles({ fnsInputPath, watcher }) {
+  const dynamicFileRouteSet = await watchFnsFiles(['*'], {
+    fnsInputPath,
+    watcher,
+  })
+
+  const staticApiRouteSet = new Set()
+  const dynamicApiRouteMap = new Map()
+
+  await watchFnsFiles(['api/**/*'], {
+    fnsInputPath,
+    watcher,
+    onChange(fnsApiFiles) {
+      const { staticRoutes: staticApiRoutes, dynamicRoutes: dynamicApiRoutes } =
+        pathsToRoutes([...fnsApiFiles], {
+          fnsInputPath,
+        })
+
+      staticApiRouteSet.clear()
+      staticApiRoutes.forEach((route) =>
+        staticApiRouteSet.add(route.toString())
+      )
+
+      dynamicApiRouteMap.clear()
+      dynamicApiRoutes.forEach((route) => {
+        const { keys, pattern } = routeToRegexp(route)
+        dynamicApiRouteMap.set(pattern, { keys, value: route })
+      })
+    },
+  })
+
+  return {
+    dynamicFileRouteSet,
+    staticApiRouteSet,
+    dynamicApiRouteMap,
+  }
+}
+
+let cachedPropsFiles
+async function watchAvailablePropsEndpoints({ fnsInputPath, watcher, ws }) {
+  const onChange = (fnsPropsFiles) => {
+    cachedPropsFiles = fnsPropsFiles
+
+    const sep = '|'
+    const names =
+      sep +
+      Array.from(fnsPropsFiles)
+        .join('|')
+        .replace(/\/props\//gm, '') +
+      sep
+
+    // This will make it available during SSR
+    globalThis.__AVAILABLE_PROPS_ENDPOINTS__ = names
+
+    // Send to frontend
+    ws.send({
+      type: 'custom',
+      event: 'props-endpoints-change',
+      data: { names },
+    })
+  }
+
+  if (cachedPropsFiles) {
+    onChange(cachedPropsFiles)
+  } else {
+    await watchFnsFiles(['props/**/*'], {
+      fnsInputPath,
+      watcher,
+      onChange,
+    })
+  }
+}
+
 export async function configureServer({ middlewares, config, watcher, ws }) {
-  await prepareEnvironment()
+  const fnsInputPath = `${config.root}/${fnsInDir}`
+  await prepareEnvironment(config)
 
-  const fnsDirFiles = await watchDynamicFiles({ config, watcher })
+  const { dynamicFileRouteSet, staticApiRouteSet, dynamicApiRouteMap } =
+    await getAllFunctionFiles({ fnsInputPath, watcher })
 
-  watchPropReload({ config, watcher, ws })
+  await watchAvailablePropsEndpoints({ fnsInputPath, watcher, ws })
+  watchPropReload({ fnsInputPath, watcher, ws })
 
   middlewares.use(async function (req, res, next) {
-    const url = getUrl(req)
+    const url = getUrlFromNodeRequest(req)
 
     if (url.pathname.startsWith('/props/')) {
       return await handleFunctionRequest(req, res, {
-        config,
+        fnsInputPath,
         functionPath: url.searchParams.get('propsGetter'),
         extra: url.searchParams.has('data')
           ? JSON.parse(decodeURIComponent(url.searchParams.get('data')))
@@ -185,20 +261,55 @@ export async function configureServer({ middlewares, config, watcher, ws }) {
       })
     }
 
-    const normalizedPathname = url.pathname.split('.')[0]
+    const normalizedPathname = url.pathname.includes('.')
+      ? url.pathname.slice(0, url.pathname.lastIndexOf('.'))
+      : url.pathname
 
     if (
       url.pathname.startsWith('/api/') ||
-      fnsDirFiles.has(normalizedPathname.slice(1))
+      dynamicFileRouteSet.has(normalizedPathname)
     ) {
+      let params
+      let functionPath =
+        (dynamicFileRouteSet.has(normalizedPathname) ||
+          staticApiRouteSet.has(normalizedPathname)) &&
+        normalizedPathname
+
+      if (!functionPath) {
+        const match = findRouteValue(normalizedPathname, {
+          dynamicMap: dynamicApiRouteMap,
+        })
+
+        if (match) {
+          params = match.params
+          functionPath = match.value.original
+        } else {
+          console.error(
+            new Error(
+              `Could not find a file that matches API route ${normalizedPathname}`
+            )
+          )
+
+          res.statusCode = 500
+          return res.end()
+        }
+      }
+
       return await handleFunctionRequest(req, res, {
-        config,
-        functionPath: normalizedPathname,
+        fnsInputPath,
+        functionPath,
         extra: {
           query: url.searchParams,
+          params,
           url,
         },
       })
+    }
+
+    // Request from frontend to resend the props-endpoints event
+    if (url.pathname.startsWith('/__dev-setup-props-watcher')) {
+      watchAvailablePropsEndpoints({ ws })
+      return res.end()
     }
 
     next()

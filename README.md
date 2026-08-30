@@ -20,9 +20,11 @@ See [live demo](https://vitessedge.zable.workers.dev/) and [Vue starter template
 - 🔽 HTTP/2 server push for your assets to speed up the loading time without waterfall requests.
 - 🧱 Automatically creates endpoints for your API based on filesystem routes.
 
-## Docs
+## Docs & Community
 
-See [docs](https://vitedge.netlify.app).
+See [docs](https://vitedge.js.org).
+
+To talk about Vitedge, join [ViteLand Discord](https://discord.gg/taRZdpzHhR) and check `#vitedge` channel or use [GitHub's Discussions](https://github.com/frandiox/vitedge/discussions).
 
 ## Starters
 
@@ -53,9 +55,14 @@ See [docs](https://vitedge.netlify.app).
 - [x] Support self-requests to API endpoints during SSR.
 - [x] Support parameters and wildcards in API file routes (`api/path/[param].js`).
 - [ ] Stale-while-revalidate cache for pages.
-- [ ] CORS defaults.
+- [x] CORS defaults.
 - [x] Throw errors from API/Props endpoints.
 - [x] Redirects with 3xx HTTP codes.
+- [ ] Mockup KV in development.
+- [ ] Mockup DO in development.
+- [ ] Rewrite in TypeScript.
+- [ ] Guide to bring your own view framework.
+- [ ] Preview mode to simulate Worker environment in development.
 
 ## Contributing
 
