@@ -1,17 +1,17 @@
 import React, { useState } from 'react'
-import { Redirect } from 'react-router-dom'
-import viteSSR from 'vite-ssr/react/entry-client'
-import { buildPropsRoute } from '../utils/props'
+import viteSSR, { useContext } from 'vite-ssr/react/entry-client'
+import { buildPropsRoute, fetchPageProps } from '../utils/props'
 import { onFunctionReload, setupPropsEndpointsWatcher } from '../dev/hmr'
-import { safeHandler } from '../errors'
+import { IS_SSR_PAGE } from '../utils/dom'
 
 export { ClientOnly, useContext } from 'vite-ssr/react/entry-client'
 
 export default function (App, { routes, ...options }, hook) {
   return viteSSR(App, { routes, PropsProvider, ...options }, async (ctx) => {
-    if (import.meta.hot) {
-      setupPropsEndpointsWatcher()
-      onFunctionReload(ctx.router.getCurrentRoute, fetchPageProps)
+    // @ts-ignore
+    if (__HOT__) {
+      onFunctionReload(ctx.router.getCurrentRoute, fetchPagePropsAsync)
+      await setupPropsEndpointsWatcher()
     }
 
     if (hook) {
@@ -20,22 +20,13 @@ export default function (App, { routes, ...options }, hook) {
   })
 }
 
-function fetchPageProps(route, setState = (route.meta || {}).setState) {
+function fetchPagePropsAsync(route, setState = (route.meta || {}).setState) {
   const propsRoute = buildPropsRoute(route)
 
   if (propsRoute) {
-    safeHandler(() =>
-      fetch(propsRoute.fullPath, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      }).then((res) =>
-        res.status === 299
-          ? { data: { __redirect: true, to: res.headers.get('Location') } }
-          : res.json().then((data) => ({ data }))
-      )
-    ).then(({ data }) => {
-      route.meta.state = data
-      setState(data)
+    fetchPageProps(propsRoute.fullPath).then(({ redirect, data }) => {
+      route.meta.state = redirect ? { __redirect: redirect } : data
+      setState(route.meta.state)
     })
   }
 
@@ -50,6 +41,9 @@ function PropsProvider({
   children: Page,
   ...rest
 }) {
+  // First route in a SPA has {} as initialState: request state from server.
+  const needsSpaState = !IS_SSR_PAGE && !lastRoutePath
+
   // This code can run because of a rerrender (same route) or because changing routes.
   // We only want to refresh props in the second case.
   const isChangingRoute = !!lastRoutePath && lastRoutePath !== to.path
@@ -59,10 +53,14 @@ function PropsProvider({
 
   if (state && state.__redirect) {
     to.meta.state = null
-    return React.createElement(Redirect, state)
+    // TODO Fix SPA redirect in RRv6
+    // return React.createElement(Navigate, { to: state.__redirect })
+    window.location.href = state.__redirect
+    return null
   }
 
-  if (import.meta.env.DEV) {
+  // @ts-ignore
+  if (__DEV__) {
     // For props HMR
     to.meta.setState = setState
   }
@@ -70,7 +68,7 @@ function PropsProvider({
   let isLoadingProps = false
   let isRevalidatingProps = false
 
-  if (!to.meta.state || isChangingRoute) {
+  if (!to.meta.state || isChangingRoute || needsSpaState) {
     if (from && to.path === from.path) {
       // Keep state when changing hash/query in the same route
       to.meta.state = from.meta.state || {}
@@ -78,7 +76,7 @@ function PropsProvider({
     } else {
       to.meta.state = {}
 
-      const isFetching = fetchPageProps(to, setState)
+      const isFetching = fetchPagePropsAsync(to, setState)
 
       if (isFetching) {
         if (state) {
@@ -97,4 +95,10 @@ function PropsProvider({
     ...((passToPage && state) || {}),
     ...rest,
   })
+}
+
+export function usePageProps() {
+  const { router } = useContext()
+  const { meta = {} } = router.getCurrentRoute() || {}
+  return { ...meta.state }
 }

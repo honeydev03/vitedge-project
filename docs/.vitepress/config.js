@@ -57,16 +57,41 @@ module.exports = {
             link: '/conditional-rendering',
           },
           {
-            text: 'Request Lifecycle',
-            link: '/request-lifecycle',
+            text: 'Handle Event Options',
+            link: '/handle-event',
           },
           {
             text: 'CORS',
             link: '/cors',
           },
           {
-            text: 'Troubleshooting',
-            link: '/troubleshooting',
+            text: 'Plugin Options',
+            link: '/plugin',
+          },
+          {
+            text: 'Custom Rendering',
+            link: '/custom-rendering',
+          },
+        ],
+      },
+      {
+        text: 'Recipes',
+        children: [
+          {
+            text: 'Authentication',
+            link: '/recipes/authentication',
+          },
+          {
+            text: 'Cloudflare Workers',
+            link: '/recipes/cloudflare-workers',
+          },
+          {
+            text: 'Vue',
+            link: '/recipes/vue',
+          },
+          {
+            text: 'React',
+            link: '/recipes/react',
           },
         ],
       },
@@ -74,12 +99,12 @@ module.exports = {
         text: 'Extras',
         children: [
           {
-            text: 'Integrations & How-tos',
-            link: '/integrations',
-          },
-          {
             text: 'Useful Plugins',
             link: '/useful-plugins',
+          },
+          {
+            text: 'Troubleshooting',
+            link: '/troubleshooting',
           },
         ],
       },

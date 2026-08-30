@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-import cp from 'child_process'
-
 const [, , ...args] = process.argv
 
 function parseOptions({ onlyStringArgs = [] } = {}) {
@@ -81,9 +79,8 @@ const [command] = args
     args.unshift('--experimental-json-modules')
     args.unshift('--experimental-specifier-resolution=node')
 
-    cp.spawn('node', args, {
-      stdio: [process.stdin, process.stdout, process.stderr],
-    })
+    const cp = await import('child_process')
+    cp.spawn('node', args, { stdio: 'inherit' })
   } else {
     console.log(`Command "${command}" not supported`)
   }

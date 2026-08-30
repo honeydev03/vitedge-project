@@ -9,6 +9,13 @@ declare module 'vitedge' {
       pageProps?: { passToPage: boolean }
       debug?: { mount?: boolean }
       styleCollector?: any
+      routerOptions?: {
+        scrollBehavior?: any
+        linkActiveClass?: string
+        linkExactActiveClass?: string
+        parseQuery?: any
+        stringifyQuery?: any
+      }
     },
     hook: (params: {
       app: any
@@ -23,10 +30,12 @@ declare module 'vitedge' {
 
   export const ClientOnly: any
   export const useContext: Omit<SharedContext, 'request' | 'response'>
+  export const usePageProps: () => Record<string, any>
 }
 
 export type PropsOptions = {
   status?: number
+  statusText?: string
   headers?: Record<string, string>
   cache?: {
     api?: number | boolean

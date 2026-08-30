@@ -1,20 +1,24 @@
-import type { Plugin, RollupOptions } from 'rollup'
-import type { RollupJsonOptions } from '@rollup/plugin-json'
-import type { RollupCommonJSOptions } from '@rollup/plugin-commonjs'
-import type { Options as ESbuildPluginOptions } from 'rollup-plugin-esbuild'
+import type { UserConfig, BuildOptions } from 'vite'
 import type { BuildOptions as ESBuildOptions } from 'esbuild'
-import type { UserConfig } from 'vite'
+import type {
+  BuildOptions as SsrBuildOptions,
+  ViteSsrPluginOptions,
+} from 'vite-ssr/config'
+
+type RollupOptions = Exclude<BuildOptions['rollupOptions'], undefined>
 
 interface VitedgeOptions {
-  functions?: Pick<UserConfig, 'resolve' | 'define'> & {
-    json?: RollupJsonOptions
-    esbuild?: ESbuildPluginOptions
-    plugins?: Plugin[]
-    build?: {
+  client?: SsrBuildOptions['clientOptions']
+  ssr?: SsrBuildOptions['serverOptions']
+  functions?: Pick<
+    UserConfig,
+    'resolve' | 'plugins' | 'define' | 'json' | 'esbuild'
+  > & {
+    build?: Pick<
+      BuildOptions,
+      'commonjsOptions' | 'minify' | 'target' | 'terserOptions'
+    > & {
       rollupOptions?: Omit<RollupOptions, 'input' | 'watch'>
-      commonjsOptions?: RollupCommonJSOptions
-      target: ESBuildOptions['target']
-      minify: boolean
     }
   }
   worker?: {
@@ -31,6 +35,8 @@ interface VitedgeOptions {
       | 'metafile'
     >
   }
+  excludeSsrComponents?: ViteSsrPluginOptions['excludeSsrComponents']
+  containerId?: ViteSsrPluginOptions['containerId']
 }
 
 declare module 'vitedge/plugin' {

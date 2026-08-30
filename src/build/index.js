@@ -1,3 +1,5 @@
+import { promises as fs } from 'fs'
+import { createRequire } from 'module'
 import path from 'path'
 import buildSSR from 'vite-ssr/build/index.js'
 import buildFunctions from './functions.js'
@@ -5,6 +7,7 @@ import buildWorker from './worker.js'
 import { meta, getProjectInfo } from '../config.js'
 import { lookupFile } from '../utils/files.js'
 import { getWranglerConfig } from '../utils/wrangler.js'
+import { mergeConfig } from 'vite'
 
 const {
   outDir,
@@ -12,7 +15,7 @@ const {
   ssrOutDir,
   fnsInDir,
   fnsOutFile,
-  commitHash,
+  getCommitHash,
   workerOutDir,
   workerOutFile,
   nodeOutFile,
@@ -27,67 +30,96 @@ export default async function ({
   ...workerFlags
 } = {}) {
   const { config: viteConfig, rootDir } = await getProjectInfo(mode)
-  const { fnsOptions = {}, workerOptions = {} } =
-    viteConfig.plugins.find((plugin) => plugin.name === 'vitedge') || {}
+  const {
+    getFramework,
+    pluginOptions: {
+      fnsOptions = {},
+      workerOptions = {},
+      clientOptions = {},
+      ssrOptions = {},
+    },
+  } = viteConfig.plugins.find((plugin) => plugin.name === 'vitedge') || {}
 
-  const { getPropsHandlerNames, logFunctionsBuild } = await buildFunctions({
+  const { getPropsHandlerNames } = await buildFunctions({
     mode,
     watch,
     root: rootDir,
-    logger: viteConfig.logger,
-    inDir: fnsInDir,
-    outDir,
+    fnsInputPath: path.resolve(rootDir, fnsInDir),
+    fnsOutputPath: path.resolve(rootDir, outDir),
     fileName: fnsOutFile,
     options: fnsOptions,
   })
 
   const sep = '|'
-  const propsReplacerPlugin = {
-    name: 'vitedge-props-replacer',
-    transform(code, id) {
-      // Use `transform` hook for replacing variables because `config`
-      // hook is not retriggered on watcher events.
-      if (id.endsWith('/vitedge/utils/props.js')) {
-        watch && this.addWatchFile(path.resolve(rootDir, outDir, fnsOutFile))
-        return code.replace(
-          'globalThis.__AVAILABLE_PROPS_ENDPOINTS__',
-          JSON.stringify(sep + getPropsHandlerNames().join(sep) + sep)
-        )
-      }
-    },
-  }
-
-  await buildSSR({
-    clientOptions: {
-      mode,
-      plugins: [propsReplacerPlugin],
-      build: {
-        watch,
-        outDir: path.resolve(rootDir, outDir, clientOutDir),
+  const plugins = [
+    {
+      name: 'vitedge-props-replacer',
+      transform(code, id) {
+        // Use `transform` hook for replacing variables because `config`
+        // hook is not retriggered on watcher events.
+        if (id.endsWith('/vitedge/utils/props.js')) {
+          watch && this.addWatchFile(path.resolve(rootDir, outDir, fnsOutFile))
+          return code.replace(
+            'globalThis.__AVAILABLE_PROPS_ENDPOINTS__',
+            JSON.stringify(sep + getPropsHandlerNames().join(sep) + sep)
+          )
+        }
       },
     },
-    serverOptions: {
-      mode,
-      ssr: { target: 'webworker' },
-      plugins: [{ ...propsReplacerPlugin, writeBundle: logFunctionsBuild }],
-      build: {
-        ssr,
-        outDir: path.resolve(rootDir, outDir, ssrOutDir),
-        target: 'es2019', // Support Node 12
-        rollupOptions: {
-          output: {
-            format: 'es',
+  ]
+
+  await buildSSR({
+    clientOptions: mergeConfig(
+      {
+        mode,
+        plugins,
+        build: {
+          watch,
+          outDir: path.resolve(rootDir, outDir, clientOutDir),
+        },
+      },
+      clientOptions
+    ),
+    serverOptions: mergeConfig(
+      {
+        mode,
+        ssr: { target: 'webworker' },
+        plugins,
+        build: {
+          ssr,
+          outDir: path.resolve(rootDir, outDir, ssrOutDir),
+          target: 'es2019', // Support Node 12
+          rollupOptions: {
+            output: {
+              format: 'es',
+            },
+          },
+        },
+        packageJson: {
+          type: 'module',
+          vitedge: {
+            commitHash: getCommitHash(),
           },
         },
       },
-      packageJson: {
-        type: 'module',
-        vitedge: {
-          commitHash,
-        },
-      },
-    },
+      ssrOptions
+    ),
   })
+
+  if (getFramework() === 'react') {
+    // FIXME This is a workaround related to @vite/plugin-react and type:module
+    const ssrDistDirectory = path.resolve(rootDir, outDir, ssrOutDir)
+    const require = createRequire(import.meta.url)
+    const packageJson = require(path.join(ssrDistDirectory, 'package.json'))
+    const serverBundlePath = path.join(ssrDistDirectory, packageJson.main)
+
+    const serverBundle = await fs.readFile(serverBundlePath, 'utf-8')
+    await fs.writeFile(
+      serverBundlePath,
+      serverBundle.replace('"react/jsx-runtime"', '"react/jsx-runtime.js"'),
+      'utf-8'
+    )
+  }
 
   if (entry === undefined || entry === true) {
     const defaultEntry = lookupFile({

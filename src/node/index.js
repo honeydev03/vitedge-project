@@ -8,7 +8,7 @@ export { getEventType }
 export { cors } from '../utils/cors.js'
 
 export async function handleEvent(
-  { functions, router, url, manifest, preload = true },
+  { functions, router, url, manifest, preload = true, skipSSR },
   event = {}
 ) {
   const type = getEventType({ url, functions })
@@ -19,7 +19,11 @@ export async function handleEvent(
     event.request = await nodeToFetchRequest(event.request)
   }
 
-  globalThis.fetch = createLocalFetch({ url, functions })
+  globalThis.fetch = createLocalFetch({
+    url,
+    functions,
+    headers: event.request.headers,
+  })
 
   if (type === 'api') {
     return handleApiRequest({ url, functions }, event)
@@ -40,7 +44,8 @@ export async function handleEvent(
   // This handles SPA page props requests from the browser
   if (type === 'props' || isRedirecting) {
     // Mock status when this is a props request to bypass Fetch opaque responses
-    const status = type === 'props' && isRedirecting ? 299 : propsOptions.status
+    const status =
+      type === 'props' && isRedirecting ? 299 : propsOptions.status || 404
 
     return {
       statusCode: status,
@@ -54,14 +59,15 @@ export async function handleEvent(
   // If it didn't match anything else up to here, fallback to HTML rendering
   const {
     html: body,
-    status: statusCode = 200,
-    statusText: statusMessage,
+    status: statusCode = propsOptions.status || 200,
+    statusText: statusMessage = propsOptions.statusText,
     headers: renderingHeaders,
     ...extra
   } = await router.render(url, {
     ...event,
-    initialState: pageProps,
+    initialState: { ...event.initialState, ...pageProps },
     propsStatusCode: propsOptions.status,
+    skip: skipSSR,
     manifest,
     preload,
   })

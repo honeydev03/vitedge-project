@@ -1,9 +1,26 @@
 # Getting Started
 
+Vitedge is a [Vite](https://vitejs.dev) _Edge Side Rendering_ (ESR) framework. It supports Vue and React out of the box but can work with any view library (or Vanilla JS).
+
+::: tip What is ESR?
+Think of SSR (Server Side Rendering) in CDN nodes instead of actual servers. This is possible today thanks to [**Cloudflare Workers**](https://workers.cloudflare.com/), and maybe some other platforms in the near future.
+:::
+
+Vitedge is **just a Vite app ™** that prerenders the first view in an edge worker and runs the rest as an SPA. That means it will lead to **good SEO** while keeping the **snappy routing** and **DX of an SPA**.
+
+It can replace static site generators in some situations since it builds on the fly and caches at the edge. Therefore, instead of getting a static `index.html` from the CDN, the CDN itself will create it on the fly or provide it from cache if it was already accessed (with configurable cache age + stale-while-revalidate).
+
+Even though running it at the edge is ideal, it is actually **compatible with any Node environment** such as **Vercel** or **Netlify**.
+
+::: tip Get in touch
+Join [ViteLand Discord](https://discord.gg/taRZdpzHhR) and check `#vitedge` channel or use [GitHub's Discussions](https://github.com/frandiox/vitedge/discussions).
+:::
+
 ## Requirements
 
-- Vitedge relies on native ES Modules. Therefore, during development, it is recommended using Node version `>=14`, but `12.x` should also work in production.
-- Currently, Vitedge supports Vue and React. For other frameworks, please open feature requests.
+- Vitedge relies on **native ES Modules**. Therefore, during development, it is recommended using Node version `>=14`. However, `12.x` should also work in production.
+- Currently, Vitedge supports **Vue** and **React** out of the box but it also exposes utilities for Vanilla JS or [bring-your-own-framework](./custom-rendering).
+- A Vitedge app can be deployed to **any Node.js environment** (monolith or serverless) or to **Cloudflare Workers**. For the latter, you must open an account at [Cloudflare](https://www.cloudflare.com/).
 
 ## Installation
 
@@ -29,6 +46,12 @@ First, add the following to your `package.json`:
 "type": "module",
 ```
 
+Make sure your `index.html` contains a root element with id `app`:
+
+```html
+<div id="app"></div>
+```
+
 Then, add Vitedge package:
 
 ```bash
@@ -51,10 +74,10 @@ Import `vitedge/plugin.js` in your `vite.config.js`:
 ```js
 import vitedgePlugin from 'vitedge/plugin.js'
 import vue from '@vitejs/plugin-vue'
-// import reactRefresh from '@vitejs/plugin-react-refresh'
+// import react from '@vitejs/plugin-react'
 
 export default {
-  plugins: [vitedgePlugin(), vue() /* reactRefresh() */],
+  plugins: [vitedgePlugin(), vue() /* react() */],
 }
 ```
 
@@ -106,12 +129,32 @@ Create a `<root>/functions/` directory and populate `<root>/functions/api/` with
 
 You can also add [environment files](./environment) in this directory.
 
+### 6. Replace NPM scripts to use Vitedge CLI
+
+Vitedge CLI is a simple wrapper around Vite that conveniently adds some experimental Node flags (e.g. JSON imports) to your command and detects TS projects automatically.
+
+Therefore, you must replace your scripts in `package.json` to run `vitedge` instead.
+
+```json
+{
+  "scripts": {
+    "dev": "vitedge --ssr",
+    "dev:spa": "vitedge",
+    "preview": "vitedge preview",
+    "preview:watch": "vitedge preview --build-watch",
+    "build": "rm -rf dist && vitedge build"
+  }
+}
+```
+
+See [Usage](./usage) for more information.
+
 ### TypeScript (optional)
 
 TypeScript is fully supported but needs some extra setup:
 
 - Rename all your files (including `vite.config`) to have `*.ts` extension.
-- Install `typescript` and `ts-node>=9.1` as `devDependencies`.
+- Install `typescript` and `ts-node>=10.4` as `devDependencies`.
 
 ### Web and Worker Polyfills (optional)
 

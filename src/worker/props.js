@@ -13,8 +13,7 @@ export function isPropsRequest(event) {
 }
 
 function resolvePropsRoute(url = '') {
-  const { href, origin } = new URL(url)
-  const route = router.resolve(href.replace(origin, ''))
+  const route = router.resolve(new URL(url))
 
   const resolvedFn = route && resolveFnsEndpoint(route.propsGetter, true)
 
@@ -62,8 +61,8 @@ export async function getPageProps(event) {
 
   if (!handler) {
     return {
-      response: createNotFoundResponse(),
-      options: staticOptions,
+      response: undefined,
+      options: staticOptions || {},
     }
   }
 
@@ -99,12 +98,12 @@ export async function getPageProps(event) {
 }
 
 export async function handlePropsRequest(event) {
-  const page = await getPageProps(event)
+  const { response = createNotFoundResponse() } = await getPageProps(event)
 
-  if (page.response.status >= 300 && page.response.status < 400) {
+  if (response.status >= 300 && response.status < 400) {
     // Mock redirect status on props request to bypass Fetch opaque responses
-    return new Response(page.response.body, { ...page.response, status: 299 })
+    return new Response(response.body, { ...response, status: 299 })
   }
 
-  return page.response
+  return response
 }

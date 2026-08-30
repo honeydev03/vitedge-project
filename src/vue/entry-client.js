@@ -1,15 +1,16 @@
-import { ref } from 'vue'
+import { ref, watch, shallowReadonly, shallowReactive } from 'vue'
+import { useRoute } from 'vue-router'
 import viteSSR, { ClientOnly } from 'vite-ssr/vue/entry-client'
-import { buildPropsRoute } from '../utils/props'
+import { buildPropsRoute, fetchPageProps } from '../utils/props'
 import { createHead } from '@vueuse/head'
 import { onFunctionReload, setupPropsEndpointsWatcher } from '../dev/hmr'
-import { safeHandler } from '../errors'
+import { IS_SSR_PAGE } from '../utils/dom'
 
-export { ClientOnly }
-export { useContext } from 'vite-ssr/vue/entry-client'
+export { ClientOnly, useContext } from 'vite-ssr/vue/entry-client'
 
 export default function (App, { routes, ...options }, hook) {
-  if (import.meta.env.DEV) {
+  // @ts-ignore
+  if (__DEV__) {
     // Will be used in HMR later
     routes.forEach((route) => {
       route.meta = route.meta || {}
@@ -26,27 +27,36 @@ export default function (App, { routes, ...options }, hook) {
 
       app.component(ClientOnly.name, ClientOnly)
 
-      if (import.meta.hot) {
-        setupPropsEndpointsWatcher()
+      // @ts-ignore
+      if (__HOT__) {
         onFunctionReload(
           () => router.currentRoute.value,
           async (route) => {
-            const redirect = await fetchPageProps(route)
-            if (redirect) {
-              router.replace(redirect)
-            } else {
-              // Trigger reactivity:
-              route.meta.hmr.value = !route.meta.hmr.value
+            const propsRoute = buildPropsRoute(route)
+            if (propsRoute) {
+              const { data, redirect } = await fetchPageProps(
+                propsRoute.fullPath
+              )
+
+              if (redirect) {
+                router.replace(redirect)
+              } else {
+                route.meta.state = data
+                // Trigger reactivity:
+                route.meta.hmr.value = !route.meta.hmr.value
+              }
             }
           }
         )
+
+        await setupPropsEndpointsWatcher()
       }
 
       let isFirstRoute = true
-      router.beforeEach(async (to, from) => {
+      router.beforeEach((to, from) => {
         if (isFirstRoute) {
           isFirstRoute = false
-          if (!!to.meta.state) {
+          if (!!to.meta.state && IS_SSR_PAGE) {
             // Do not get props the first time for the entry
             // route since it is already rendered in the server.
             return
@@ -59,7 +69,27 @@ export default function (App, { routes, ...options }, hook) {
           return
         }
 
-        return await fetchPageProps(to)
+        const propsRoute = buildPropsRoute(to)
+        if (propsRoute) {
+          // Asynchronous promise to enable downloading
+          // page component and props in parallel.
+          to.meta.statePromise = fetchPageProps(propsRoute.fullPath)
+        }
+      })
+
+      router.beforeResolve(async (to) => {
+        const { statePromise } = to.meta || {}
+        if (statePromise) {
+          to.meta.statePromise = null
+
+          const { data, redirect } = await statePromise
+
+          if (redirect) {
+            return redirect
+          }
+
+          to.meta.state = data
+        }
       })
 
       if (hook) {
@@ -69,29 +99,24 @@ export default function (App, { routes, ...options }, hook) {
   )
 }
 
-async function fetchPageProps(route) {
-  const propsRoute = buildPropsRoute(route)
+export function usePageProps() {
+  const { meta = {} } = useRoute() || {}
 
-  if (propsRoute) {
-    const { data, redirect } = await safeHandler(async () => {
-      const res = await fetch(propsRoute.fullPath, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      })
+  // Props reactivity in dev
+  // @ts-ignore
+  if (__DEV__) {
+    const pageProps = shallowReactive(meta.state || {})
 
-      if (res.status === 299) {
-        // 299 is a mock code to bypass fetch opaque responses
-        // on 3xx codes for redirection.
-        return { redirect: res.headers.get('Location') }
+    watch(meta.hmr, () => {
+      for (const key of Object.keys(pageProps)) {
+        delete pageProps[key]
       }
 
-      return { data: await res.json() }
+      Object.assign(pageProps, meta.state || {})
     })
 
-    if (redirect) {
-      return redirect
-    }
-
-    route.meta.state = data
+    return shallowReadonly(pageProps)
   }
+
+  return shallowReadonly(meta.state || {})
 }

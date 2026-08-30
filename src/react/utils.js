@@ -1,4 +1,4 @@
-import { matchRoutes } from 'react-router-config'
+import { matchRoutes } from 'react-router-dom'
 import {
   createUrl,
   getFullPath,
@@ -14,13 +14,16 @@ export function resolvePropsRoute(routes, path, base) {
   const routeBase = base && withoutSuffix(base({ url }), '/')
   const fullPath = getFullPath(url, routeBase)
 
-  const [{ route, match = {} } = {}] = matchRoutes(routes, url.pathname)
+  const [{ route, params = {} } = {}] = matchRoutes(
+    routes,
+    createUrl(fullPath).pathname
+  )
 
   const data = {
     ...route,
     fullPath,
     query: Object.fromEntries(url.searchParams),
-    params: match.params,
+    params,
   }
 
   return buildPropsRoute(data)
